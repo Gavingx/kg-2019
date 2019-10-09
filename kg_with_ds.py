@@ -1,30 +1,32 @@
 #! -*- coding:utf-8 -*-
 
-
-from __future__ import print_function
 import json
 import numpy as np
 from random import choice
 from tqdm import tqdm
 import pyhanlp
 from gensim.models import Word2Vec
-import re, os
+import re
+import os
 import ahocorasick
+import traceback
+from gensim.models import KeyedVectors
 
+
+project_path = os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
 
 mode = 0
 char_size = 128
 maxlen = 512
 
-
-word2vec = Word2Vec.load('../word2vec_baike/word2vec_baike')
-
-
-id2word = {i+1:j for i,j in enumerate(word2vec.wv.index2word)}
-word2id = {j:i for i,j in id2word.items()}
-word2vec = word2vec.wv.syn0
-word_size = word2vec.shape[1]
-word2vec = np.concatenate([np.zeros((1, word_size)), word2vec])
+# 将腾讯的词向量加载到word2vec中
+word2vec = KeyedVectors.load_word2vec_format(os.path.join(project_path, 'datasets/subed_word_embedding.txt'))
+# word2vec = Word2Vec.load('../word2vec_baike/word2vec_baike')
+id2word = {i+1: j for i, j in enumerate(word2vec.wv.index2word)}
+word2id = {j: i for i, j in id2word.items()}
+word2vec = word2vec.wv.syn0 # (1000000, 200)
+word_size = word2vec.shape[1] # 200
+word2vec = np.concatenate([np.zeros((1, word_size)), word2vec]) # 为什么要在最后添加一行0
 
 
 def tokenize(s):
@@ -45,25 +47,23 @@ def sent2vec(S):
     return V
 
 
-total_data = json.load(open('../datasets/train_data_vote_me.json'))
-id2predicate, predicate2id = json.load(open('../datasets/all_50_schemas_me.json'))
-id2predicate = {int(i):j for i,j in id2predicate.items()}
-id2char, char2id = json.load(open('../datasets/all_chars_me.json'))
+# 将训练集和测试集数据打乱，随机分成8份，一份做验证集，另外7份做训练集进行训练
+total_data = json.load(open(os.path.join(project_path, 'datasets/train_data_vote_me.json'), 'r', encoding='utf-8'))
+id2predicate, predicate2id = json.load(open(os.path.join(project_path, 'datasets/all_50_schemas_me.json'), 'r', encoding='utf-8'))
+id2predicate = {int(i): j for i, j in id2predicate.items()}
+id2char, char2id = json.load(open(os.path.join(project_path, 'datasets/all_chars_me.json'), 'r', encoding='utf-8'))
 num_classes = len(id2predicate)
-
-
-if not os.path.exists('../random_order_vote.json'):
-    random_order = range(len(total_data))
+if not os.path.exists(os.path.join(project_path, 'datasets/random_order_vote.json')):
+    random_order = list(range(len(total_data)))
     np.random.shuffle(random_order)
     json.dump(
         random_order,
-        open('../random_order_vote.json', 'w'),
-        indent=4
+        open(os.path.join(project_path, 'datasets/random_order_vote.json'), 'w', encoding='utf-8'),
+        indent=4,
+        ensure_ascii=False
     )
 else:
-    random_order = json.load(open('../random_order_vote.json'))
-
-
+    random_order = json.load(open(os.path.join(project_path, 'datasets/random_order_vote.json'), 'r', encoding='utf-8'))
 train_data = [total_data[j] for i, j in enumerate(random_order) if i % 8 != mode]
 dev_data = [total_data[j] for i, j in enumerate(random_order) if i % 8 == mode]
 
@@ -96,6 +96,7 @@ def repair(d):
 
 
 for d in train_data:
+
     repair(d)
     for sp in d['spo_list']:
         if sp[1] not in predicates:
@@ -135,13 +136,18 @@ class AC_Unicode:
     """
     def __init__(self):
         self.ac = ahocorasick.Automaton()
+
     def add_word(self, k, v):
-        k = k.encode('utf-8')
+        # 将词添加到ACtree中
         return self.ac.add_word(k, v)
+
     def make_automaton(self):
+        # 根据adtree创建ac自动机
         return self.ac.make_automaton()
+
     def iter(self, s):
         s = s.encode('utf-8')
+        # 迭代字符串s，从中找出能匹配上字符串的子串
         return self.ac.iter(s)
 
 
@@ -163,6 +169,7 @@ class spo_searcher:
                 self.spo_total[(s, p, o)].add(i)
         self.s_ac.make_automaton()
         self.o_ac.make_automaton()
+
     def extract_items(self, text_in, text_idx=None):
         R = set()
         for s in self.s_ac.iter(text_in):
@@ -186,11 +193,13 @@ class data_generator:
         self.steps = len(self.data) // self.batch_size
         if len(self.data) % self.batch_size != 0:
             self.steps += 1
+
     def __len__(self):
         return self.steps
+
     def __iter__(self):
         while True:
-            idxs = range(len(self.data))
+            idxs = list(range(len(self.data)))
             np.random.shuffle(idxs)
             T1, T2, S1, S2, K1, K2, O1, O2, PRES, PREO = [], [], [], [], [], [], [], [], [], []
             for i in idxs:
@@ -274,8 +283,8 @@ from keras.optimizers import Adam
 
 
 if __name__ == '__main__':
-    config = K.tf.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction = 0.7
+    config = K.tf.ConfigProto() # 对session进行参数配置
+    config.gpu_options.per_process_gpu_memory_fraction = 0.7 # 指定每个GPU使用显存的上限为0.7
     session = K.tf.Session(config=config)
     K.set_session(session)
 
@@ -328,6 +337,7 @@ class Attention(Layer):
         self.size_per_head = size_per_head
         self.out_dim = nb_head * size_per_head
         super(Attention, self).__init__(**kwargs)
+
     def build(self, input_shape):
         super(Attention, self).build(input_shape)
         q_in_dim = input_shape[0][-1]
@@ -342,6 +352,7 @@ class Attention(Layer):
         self.v_kernel = self.add_weight(name='w_kernel',
                                         shape=(v_in_dim, self.out_dim),
                                         initializer='glorot_normal')
+
     def mask(self, x, mask, mode='mul'):
         if mask is None:
             return x
@@ -352,6 +363,7 @@ class Attention(Layer):
                 return x * mask
             else:
                 return x - (1 - mask) * 1e10
+
     def call(self, inputs):
         q, k, v = inputs[:3]
         v_mask, q_mask = None, None
@@ -383,6 +395,7 @@ class Attention(Layer):
         o = K.reshape(o, (-1, K.shape(o)[1], self.out_dim))
         o = self.mask(o, q_mask, 'mul')
         return o
+
     def compute_output_shape(self, input_shape):
         return (input_shape[0][0], input_shape[0][1], self.out_dim)
 
@@ -401,15 +414,17 @@ preo_in = Input(shape=(None, num_classes * 2))
 t1, t2, s1, s2, k1, k2, o1, o2, pres, preo = t1_in, t2_in, s1_in, s2_in, k1_in, k2_in, o1_in, o2_in, pres_in, preo_in
 mask = Lambda(lambda x: K.cast(K.greater(K.expand_dims(x, 2), 0), 'float32'))(t1)
 
+
 def position_id(x):
     if isinstance(x, list) and len(x) == 2:
         x, r = x
     else:
         r = 0
-    pid = K.arange(K.shape(x)[1])
-    pid = K.expand_dims(pid, 0)
-    pid = K.tile(pid, [K.shape(x)[0], 1])
-    return K.abs(pid - K.cast(r, 'int32'))
+    pid = K.arange(K.shape(x)[1]) # K.shape(x): 看x的维度；K.arange(x):创建1D张量
+    pid = K.expand_dims(pid, 0) # 在第0个维度扩展一个维度
+    pid = K.tile(pid, [K.shape(x)[0], 1]) # keras.backend.tile(x, n) 创建一个用 n 平铺 的 x 张量。 参数 x : 张量或变量。 n : 整数列表。长度必须与 x 中的维数相同。 返回 一个平铺的张量
+    return K.abs(pid - K.cast(r, 'int32')) # K.abs:元素绝对值
+
 
 pid = Lambda(position_id)(t1)
 position_embedding = Embedding(maxlen, char_size, embeddings_initializer='zeros')
@@ -454,6 +469,7 @@ t_max = Lambda(seq_maxpool)([t, mask])
 pc = Dense(char_size, activation='relu')(t_max)
 pc = Dense(num_classes, activation='sigmoid')(pc)
 
+
 def get_k_inter(x, n=6):
     seq, k1, k2 = x
     k_inter = [K.round(k1 * a + k2 * (1 - a)) for a in np.arange(n) / (n - 1.)]
@@ -461,6 +477,7 @@ def get_k_inter(x, n=6):
     k_inter = [K.expand_dims(k, 1) for k in k_inter]
     k_inter = K.concatenate(k_inter, 1)
     return k_inter
+
 
 k = Lambda(get_k_inter, output_shape=(6, t_dim))([t, k1, k2])
 k = Bidirectional(CuDNNGRU(t_dim))(k)
@@ -513,6 +530,7 @@ class ExponentialMovingAverage:
         self.momentum = momentum
         self.model = model
         self.ema_weights = [K.zeros(K.shape(w)) for w in model.weights]
+
     def inject(self):
         """添加更新算子到model.metrics_updates。
         """
@@ -520,17 +538,20 @@ class ExponentialMovingAverage:
         for w1, w2 in zip(self.ema_weights, self.model.weights):
             op = K.moving_average_update(w1, w2, self.momentum)
             self.model.metrics_updates.append(op)
+
     def initialize(self):
         """ema_weights初始化跟原模型初始化一致。
         """
         self.old_weights = K.batch_get_value(self.model.weights)
         K.batch_set_value(zip(self.ema_weights, self.old_weights))
+
     def apply_ema_weights(self):
         """备份原模型权重，然后将平均权重应用到模型上去。
         """
         self.old_weights = K.batch_get_value(self.model.weights)
         ema_weights = K.batch_get_value(self.ema_weights)
         K.batch_set_value(zip(self.model.weights, ema_weights))
+
     def reset_old_weights(self):
         """恢复模型到旧权重。
         """
@@ -622,6 +643,7 @@ class Evaluate(Callback):
         self.best = 0.
         self.passed = 0
         self.stage = 0
+
     def on_batch_begin(self, batch, logs=None):
         """第一个epoch用来warmup，不warmup有不收敛的可能。
         """
@@ -629,6 +651,7 @@ class Evaluate(Callback):
             lr = (self.passed + 1.) / self.params['steps'] * 1e-3
             K.set_value(self.model.optimizer.lr, lr)
             self.passed += 1
+
     def on_epoch_end(self, epoch, logs=None):
         EMAer.apply_ema_weights()
         f1, precision, recall = self.evaluate()
@@ -650,6 +673,7 @@ class Evaluate(Callback):
             opt_weights = K.batch_get_value(self.model.optimizer.weights)
             opt_weights = [w * 0. for w in opt_weights]
             K.batch_set_value(zip(self.model.optimizer.weights, opt_weights))
+
     def evaluate(self):
         orders = ['subject', 'predicate', 'object']
         A, B, C = 1e-10, 1e-10, 1e-10
