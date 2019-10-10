@@ -286,7 +286,7 @@ if __name__ == '__main__':
     config = K.tf.ConfigProto() # 对session进行参数配置
     config.gpu_options.per_process_gpu_memory_fraction = 0.7 # 指定每个GPU使用显存的上限为0.7
     session = K.tf.Session(config=config)
-    K.set_session(session)
+    K.set_session(session) # 设置session为默认session
 
 
 def seq_gather(x):
@@ -412,9 +412,9 @@ pres_in = Input(shape=(None, 2))
 preo_in = Input(shape=(None, num_classes * 2))
 
 t1, t2, s1, s2, k1, k2, o1, o2, pres, preo = t1_in, t2_in, s1_in, s2_in, k1_in, k2_in, o1_in, o2_in, pres_in, preo_in
-mask = Lambda(lambda x: K.cast(K.greater(K.expand_dims(x, 2), 0), 'float32'))(t1)
-
-
+mask = Lambda(lambda x: K.cast(K.greater(K.expand_dims(x, 2), 0), 'float32'))(t1) # keras.backend.expand_dims(x, axis): 在x的第axis维度上增加一个维度；
+# keras.backend.greater(x, y): 将x的每个元素与y对比，大于则为True，小于则为False，返回bool值为True的tensor
+# keras.backend.cast(x, dtype): 将x的元素格式设置成dtype
 def position_id(x):
     if isinstance(x, list) and len(x) == 2:
         x, r = x
