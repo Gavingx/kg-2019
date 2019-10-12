@@ -283,8 +283,9 @@ from keras.optimizers import Adam
 
 
 if __name__ == '__main__':
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     config = K.tf.ConfigProto() # 对session进行参数配置
-    config.gpu_options.per_process_gpu_memory_fraction = 0.7 # 指定每个GPU使用显存的上限为0.7
+    # config.gpu_options.per_process_gpu_memory_fraction = 0.7 # 指定每个GPU使用显存的上限为0.7
     session = K.tf.Session(config=config)
     K.set_session(session) # 设置session为默认session
 
