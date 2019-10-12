@@ -146,7 +146,6 @@ class AC_Unicode:
         return self.ac.make_automaton()
 
     def iter(self, s):
-        s = s.encode('utf-8')
         # 迭代字符串s，从中找出能匹配上字符串的子串
         return self.ac.iter(s)
 
